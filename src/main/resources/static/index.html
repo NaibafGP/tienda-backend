@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tienda Dashboard | Spring Boot Backend</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="background-decor-1"></div>
+    <div class="background-decor-2"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="logo">
+                <i class="fa-solid fa-bolt-lightning logo-icon"></i>
+                <h1>SmartStore <span>Dashboard</span></h1>
+            </div>
+            <div class="status-badge">
+                <span class="pulse-indicator"></span>
+                <span>Spring Boot API: Online</span>
+            </div>
+        </header>
+
+        <main class="dashboard-grid">
+            <!-- Formulario de Registro -->
+            <section class="card form-section">
+                <h2><i class="fa-solid fa-plus-circle"></i> Registrar Producto</h2>
+                <form id="productoForm">
+                    <div class="form-group">
+                        <label for="nombre">Nombre del Producto</label>
+                        <input type="text" id="nombre" placeholder="Ej. Laptop Asus, Mouse, etc." required>
+                    </div>
+                    <div class="form-group-row">
+                        <div class="form-group">
+                            <label for="precio">Precio (S/.)</label>
+                            <input type="number" id="precio" step="0.01" min="0.1" placeholder="0.00" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="stock">Stock Inicial</label>
+                            <input type="number" id="stock" min="1" placeholder="10" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-primary">
+                        <i class="fa-solid fa-save"></i> Guardar en Base de Datos
+                    </button>
+                </form>
+            </section>
+
+            <!-- Lista de Productos -->
+            <section class="card products-section">
+                <div class="section-header">
+                    <h2><i class="fa-solid fa-boxes-stacked"></i> Inventario en Tiempo Real</h2>
+                    <button id="btnActualizar" class="btn-secondary" title="Actualizar inventario">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                
+                <div id="loading" class="loading-state">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <p>Conectando con el backend...</p>
+                </div>
+
+                <div id="productosGrid" class="products-grid">
+                    <!-- Las tarjetas de productos se insertarán aquí dinámicamente -->
+                </div>
+
+                <div id="emptyState" class="empty-state hidden">
+                    <i class="fa-regular fa-folder-open"></i>
+                    <p>No hay productos en inventario. ¡Agrega el primero!</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Notificaciones animadas -->
+    <div id="notificationArea" class="notification-area"></div>
+
+    <script>
+        const API_URL = '/api/productos';
+
+        // Elementos DOM
+        const productoForm = document.getElementById('productoForm');
+        const productosGrid = document.getElementById('productosGrid');
+        const loading = document.getElementById('loading');
+        const emptyState = document.getElementById('emptyState');
+        const btnActualizar = document.getElementById('btnActualizar');
+
+        // Escuchar envío del formulario
+        productoForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const nombre = document.getElementById('nombre').value;
+            const precio = parseFloat(document.getElementById('precio').value);
+            const stock = parseInt(document.getElementById('stock').value);
+
+            const producto = { nombre, precio, stock };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(producto)
+                });
+
+                if (response.ok) {
+                    showNotification('Producto registrado con éxito', 'success');
+                    productoForm.reset();
+                    cargarProductos();
+                } else {
+                    showNotification('Error al registrar el producto', 'error');
+                }
+            } catch (error) {
+                showNotification('Error de conexión con el servidor', 'error');
+            }
+        });
+
+        // Cargar productos del backend
+        async function cargarProductos() {
+            mostrarCargando(true);
+            try {
+                const response = await fetch(API_URL);
+                if (response.ok) {
+                    const productos = await response.json();
+                    renderProductos(productos);
+                } else {
+                    showNotification('Error al cargar productos del servidor', 'error');
+                }
+            } catch (error) {
+                showNotification('No se pudo conectar con la API de Spring Boot', 'error');
+                renderProductos([]);
+            } finally {
+                mostrarCargando(false);
+            }
+        }
+
+        // Renderizar productos en pantalla
+        function renderProductos(productos) {
+            productosGrid.innerHTML = '';
+            
+            if (productos.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            
+            emptyState.classList.add('hidden');
+
+            productos.forEach(producto => {
+                const card = document.createElement('div');
+                card.className = 'product-card';
+                card.innerHTML = `
+                    <div class="product-info">
+                        <h3>${escapeHtml(producto.nombre)}</h3>
+                        <div class="product-meta">
+                            <span class="price">S/. ${producto.precio.toFixed(2)}</span>
+                            <span class="stock ${producto.stock <= 3 ? 'low-stock' : ''}">
+                                ${producto.stock} unidades
+                            </span>
+                        </div>
+                    </div>
+                    <div class="product-actions">
+                        <button onclick="venderProducto(${producto.id}, 1)" class="btn-sell" ${producto.stock === 0 ? 'disabled' : ''}>
+                            <i class="fa-solid fa-cart-shopping"></i> Vender 1
+                        </button>
+                        <button onclick="eliminarProducto(${producto.id})" class="btn-delete" title="Eliminar">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+                productosGrid.appendChild(card);
+            });
+        }
+
+        // Vender producto
+        async function venderProducto(id, cantidad) {
+            try {
+                const response = await fetch(`${API_URL}/${id}/vender?cantidad=${cantidad}`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showNotification('Venta realizada con éxito', 'success');
+                    cargarProductos();
+                } else {
+                    const errorText = await response.text();
+                    showNotification(`Error: ${errorText}`, 'warning');
+                }
+            } catch (error) {
+                showNotification('Error de conexión', 'error');
+            }
+        }
+
+        // Eliminar producto
+        async function eliminarProducto(id) {
+            if (!confirm('¿Estás seguro de que deseas eliminar este producto?')) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showNotification('Producto eliminado', 'info');
+                    cargarProductos();
+                } else {
+                    showNotification('Error al eliminar', 'error');
+                }
+            } catch (error) {
+                showNotification('Error de conexión', 'error');
+            }
+        }
+
+        // Utilidades visuales
+        function mostrarCargando(isCargando) {
+            if (isCargando) {
+                loading.classList.remove('hidden');
+                productosGrid.classList.add('hidden');
+            } else {
+                loading.classList.add('hidden');
+                productosGrid.classList.remove('hidden');
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            const area = document.getElementById('notificationArea');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            
+            let icon = 'fa-info-circle';
+            if (type === 'success') icon = 'fa-check-circle';
+            if (type === 'warning') icon = 'fa-exclamation-triangle';
+            if (type === 'error') icon = 'fa-times-circle';
+
+            toast.innerHTML = `
+                <i class="fa-solid ${icon}"></i>
+                <span>${message}</span>
+            `;
+            
+            area.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Eventos iniciales
+        btnActualizar.addEventListener('click', cargarProductos);
+        window.addEventListener('DOMContentLoaded', cargarProductos);
+    </script>
+</body>
+</html>
